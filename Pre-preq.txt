@@ -1,0 +1,4 @@
+compile with:
+nvcc -O3 -arch=sm_70 lbm3d_vortex.cu -o lbm3d_vortex -lGL -lGLU -lGLEW -lglfw
+
+run with: /.lbm3d_vortex
