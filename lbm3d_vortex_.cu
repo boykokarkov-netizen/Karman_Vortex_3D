@@ -4,11 +4,9 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
-
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <GL/glu.h>
-
 #include <cuda_runtime.h>
 
 #define NX 300
