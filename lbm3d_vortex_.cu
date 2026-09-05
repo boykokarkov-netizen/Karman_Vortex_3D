@@ -1,23 +1,13 @@
-// ============================================================================
-//  lbm3d_vortex_final.cu  —  3D Karman Vortex Simulation & Visualizer
-//  [корекции: (1) входният слой x<2 изключен от визуализацията — Dirichlet
-//   артефакти; (2) --pipeline отново измерва и печата резултат; (3) върнат
-//   самоописващият се конфигурационен ред при старт]
-// ============================================================================
-
 #include <iostream>
 #include <vector>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
-
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <GL/glu.h>
-
 #include <cuda_runtime.h>
-
 #define NX 300
 #define NY 200
 #define NZ 100
