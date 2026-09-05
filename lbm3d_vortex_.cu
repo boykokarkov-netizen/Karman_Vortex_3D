@@ -1,12 +1,21 @@
+// ============================================================================
+//  lbm3d_vortex_final.cu  —  3D Karman Vortex Simulation & Visualizer
+//  [корекции: (1) входният слой x<2 изключен от визуализацията — Dirichlet
+//   артефакти; (2) --pipeline отново измерва и печата резултат; (3) върнат
+//   самоописващият се конфигурационен ред при старт]
+// ============================================================================
+
 #include <iostream>
 #include <vector>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <GL/glu.h>
+
 #include <cuda_runtime.h>
 
 #define NX 300
@@ -157,7 +166,8 @@ __global__ void generateVortexCloudKernel(
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int z = blockIdx.z * blockDim.z + threadIdx.z;
     if (x >= NX || y >= NY || z >= NZ) return;
-    if (x >= NX - SPONGE_W) return;
+    if (x >= NX - SPONGE_W) return;   // sponge зоната не се рисува
+    if (x < 2) return;                // [КОРЕКЦИЯ] входен слой: Dirichlet артефакти
 
     size_t n = idx3d(x, y, z);
 
@@ -341,11 +351,20 @@ static void runPipeline(int nframes, float*& d_F, float*& d_F2,
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
+    // [ВЪЗСТАНОВЕНО] измерване и отчет — без тях режимът не връща резултат
+    const char* names[2] = {
+        "A: host-mediated (D2H copy)",
+        "B: zero-copy     (no D2H) "
+    };
+    double frame_ms[2] = {0, 0};
+    double avg_pts [2] = {0, 0};
+
     for (int variant = 0; variant < 2; ++variant) {
         bool doCopy = (variant == 0);
         cudaEvent_t e0, e1;
         CUDA_CHECK(cudaEventCreate(&e0));
         CUDA_CHECK(cudaEventCreate(&e1));
+        long long ptsSum = 0;
 
         CUDA_CHECK(cudaEventRecord(e0));
         for (int fr = 0; fr < nframes; ++fr) {
@@ -359,6 +378,7 @@ static void runPipeline(int nframes, float*& d_F, float*& d_F2,
 
             int h_pointCount = 0;
             CUDA_CHECK(cudaMemcpy(&h_pointCount, d_pointCount, sizeof(int), cudaMemcpyDeviceToHost));
+            ptsSum += h_pointCount;
 
             if (doCopy && h_pointCount > 0) {
                 CUDA_CHECK(cudaMemcpy(h_points.data(), d_points, h_pointCount * sizeof(float3), cudaMemcpyDeviceToHost));
@@ -367,8 +387,27 @@ static void runPipeline(int nframes, float*& d_F, float*& d_F2,
         }
         CUDA_CHECK(cudaEventRecord(e1));
         CUDA_CHECK(cudaEventSynchronize(e1));
+        float ms = 0.0f;
+        CUDA_CHECK(cudaEventElapsedTime(&ms, e0, e1));
+        frame_ms[variant] = ms / nframes;
+        avg_pts [variant] = (double)ptsSum / nframes;
         cudaEventDestroy(e0); cudaEventDestroy(e1);
     }
+
+    double mbFrame = avg_pts[0] * 15.0 / 1e6;
+    double dltaMs  = frame_ms[0] - frame_ms[1];
+
+    printf("=====================================================\n");
+    printf("  VISUALIZATION-PATH EXPERIMENT (%d frames x 50 steps, grid %dx%dx%d)\n",
+           nframes, NX, NY, NZ);
+    for (int v = 0; v < 2; ++v) {
+        printf("  %s : %8.3f ms/frame  (%6.1f FPS eq.)  avg points %.0f\n",
+               names[v], frame_ms[v], 1000.0 / frame_ms[v], avg_pts[v]);
+    }
+    printf("  D2H payload      : %.2f MB/frame\n", mbFrame);
+    printf("  Transfer cost    : %.3f ms/frame  =  %.1f%% of frame\n",
+           dltaMs, dltaMs / frame_ms[0] * 100.0);
+    printf("=====================================================\n");
 
     cudaFree(d_points); cudaFree(d_colors); cudaFree(d_pointCount);
 }
@@ -602,6 +641,9 @@ int main(int argc, char** argv) {
     dim3 blocks((NX + threads.x - 1) / threads.x,
                 (NY + threads.y - 1) / threads.y,
                 (NZ + threads.z - 1) / threads.z);
+    printf("threads(%d,%d,%d) blocks(%d,%d,%d) grid %dx%dx%d\n",
+           threads.x, threads.y, threads.z,
+           blocks.x, blocks.y, blocks.z, NX, NY, NZ);   // [самоописание]
 
     initKernel3D<<<blocks, threads>>>(d_F, d_mask);
     CUDA_CHECK(cudaDeviceSynchronize());
